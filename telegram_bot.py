@@ -10,8 +10,8 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 OPENAI_API_KEY     = os.environ["OPENAI_API_KEY"]
-INVITE_LINK        = os.environ["INVITE_LINK"]
-MAIN_CHANNEL       = os.environ["MAIN_CHANNEL"]
+FOLDER_LINK        = os.environ["FOLDER_LINK"]
+CHANNEL_ID         = int(os.environ["CHANNEL_ID"])
 
 USED_USERS_FILE = "used_users.json"
 
@@ -28,13 +28,21 @@ def save_used_users(users: set):
     with open(USED_USERS_FILE, "w") as f:
         json.dump(list(users), f)
 
-async def verify_screenshot_with_ai(image_bytes: bytes) -> tuple[bool, str]:
+async def verify_screenshot_with_ai(image_bytes: bytes) -> tuple[int, bool, str]:
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-    prompt = f"""You are a verification assistant for a Telegram bot.
-A user claims to have shared a post from '{MAIN_CHANNEL}' to 5 different Telegram channels and sent a screenshot as proof.
-Check: 1) Does it show Telegram? 2) Does it show a forwarded or shared post? 3) Is it a real screenshot?
-Respond ONLY with JSON, no extra text:
-{{"valid": true, "reason": "Brief reason"}} or {{"valid": false, "reason": "Brief reason"}}"""
+    prompt = """You are a verification assistant for a Telegram bot.
+A user claims to have shared a Telegram folder link to 3 different Telegram channels or groups and sent a screenshot as proof.
+
+Carefully examine the screenshot and count how many different chats/channels/groups the link was shared to.
+
+Respond ONLY with JSON, no extra text, in this exact format:
+{"count": 3, "valid": true, "reason": "Brief reason"}
+
+Rules:
+- If it does not show Telegram at all or is not a real screenshot: count=0, valid=false
+- If it shows the link shared to 1 chat: count=1, valid=false
+- If it shows the link shared to 2 chats: count=2, valid=false
+- If it shows the link shared to 3 or more chats: count=3, valid=true"""
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
@@ -60,26 +68,29 @@ Respond ONLY with JSON, no extra text:
 
     if response.status_code != 200:
         logger.error(f"OpenAI API error: {response.text}")
-        return False, "Verification service error. Please try again later."
+        return 0, False, "Verification service error. Please try again later."
 
     data = response.json()
     raw_text = data["choices"][0]["message"]["content"].strip()
     try:
         clean = raw_text.replace("```json", "").replace("```", "").strip()
         result = json.loads(clean)
-        return bool(result.get("valid", False)), result.get("reason", "No reason provided")
+        count = int(result.get("count", 0))
+        valid = bool(result.get("valid", False))
+        reason = result.get("reason", "No reason provided")
+        return count, valid, reason
     except json.JSONDecodeError:
         logger.error(f"Failed to parse AI response: {raw_text}")
-        return False, "Could not process your screenshot. Please send a clear screenshot."
+        return 0, False, "Could not process your screenshot. Please send a clear screenshot."
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"👋 Welcome!\n\n"
         f"To receive the exclusive invite link:\n\n"
-        f"1️⃣ Go to {MAIN_CHANNEL}\n"
-        f"2️⃣ Share any post to 5 different Telegram channels or groups\n"
-        f"3️⃣ Take a screenshot showing the shares\n"
-        f"4️⃣ Send the screenshot here\n\n"
+        f"1️⃣ Share the folder link below to 3 different Telegram channels or groups:\n"
+        f"{FOLDER_LINK}\n\n"
+        f"2️⃣ Take a screenshot showing the shares\n"
+        f"3️⃣ Send the screenshot here\n\n"
         f"Our AI will verify your proof and send you the invite link! ✅"
     )
 
@@ -102,22 +113,34 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo = update.message.photo[-1]
         file = await context.bot.get_file(photo.file_id)
         image_bytes = await file.download_as_bytearray()
-        is_valid, reason = await verify_screenshot_with_ai(bytes(image_bytes))
+        count, is_valid, reason = await verify_screenshot_with_ai(bytes(image_bytes))
 
         if is_valid:
+            # Generate a unique one-time invite link
+            invite = await context.bot.create_chat_invite_link(
+                chat_id=CHANNEL_ID,
+                member_limit=1,
+                name=f"User {user_id}"
+            )
             used_users.add(user_id)
             save_used_users(used_users)
             await processing_msg.edit_text(
                 f"✅ Verification successful!\n\n"
                 f"Thank you {user_name}! Here is your exclusive invite link:\n\n"
-                f"🔗 {INVITE_LINK}\n\n"
-                f"This link is for you only, please do not share it."
+                f"🔗 {invite.invite_link}\n\n"
+                f"This link is for you only and can only be used once — please do not share it."
+            )
+        elif count == 2:
+            await processing_msg.edit_text(
+                "⚠️ You only shared to 2 channels, share 1 more time to get access!"
+            )
+        elif count == 1:
+            await processing_msg.edit_text(
+                "⚠️ You only shared to 1 channel, share 2 more times to get access!"
             )
         else:
             await processing_msg.edit_text(
-                f"❌ Verification failed\n\n"
-                f"Reason: {reason}\n\n"
-                f"Make sure your screenshot clearly shows you shared a post from {MAIN_CHANNEL} to 5 channels, then try again."
+                "❌ Struggling to share the link? Please contact Reggie!"
             )
     except Exception as e:
         logger.error(f"Error for user {user_id}: {e}")
