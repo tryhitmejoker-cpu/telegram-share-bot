@@ -32,7 +32,7 @@ async def verify_screenshot_with_ai(image_bytes: bytes) -> tuple[bool, str]:
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
     prompt = f"""You are a verification assistant for a Telegram bot.
 A user claims to have shared a post from '{MAIN_CHANNEL}' to 5 different Telegram channels and sent a screenshot as proof.
-Check: 1) Does it show Telegram? 2) Does it show a forwarded/shared post? 3) Is it a real screenshot?
+Check: 1) Does it show Telegram? 2) Does it show a forwarded or shared post? 3) Is it a real screenshot?
 Respond ONLY with JSON, no extra text:
 {{"valid": true, "reason": "Brief reason"}} or {{"valid": false, "reason": "Brief reason"}}"""
 
@@ -74,13 +74,13 @@ Respond ONLY with JSON, no extra text:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        f"👋 Welcome!\n\nTo receive the exclusive invite link:\n\n"
+        f"👋 Welcome!\n\n"
+        f"To receive the exclusive invite link:\n\n"
         f"1️⃣ Go to {MAIN_CHANNEL}\n"
-        f"2️⃣ Share any post to *5 different Telegram channels or groups*\n"
+        f"2️⃣ Share any post to 5 different Telegram channels or groups\n"
         f"3️⃣ Take a screenshot showing the shares\n"
         f"4️⃣ Send the screenshot here\n\n"
-        f"Our AI will verify your proof and send you the invite link! ✅",
-        parse_mode="Markdown"
+        f"Our AI will verify your proof and send you the invite link! ✅"
     )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -89,10 +89,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     used_users = load_used_users()
     if user_id in used_users:
-        await update.message.reply_text("⚠️ You've already received the invite link! Each user can only receive it once.")
+        await update.message.reply_text(
+            "⚠️ You have already received the invite link! Each user can only receive it once."
+        )
         return
 
-    processing_msg = await update.message.reply_text("🔍 Verifying your screenshot with AI... please wait.")
+    processing_msg = await update.message.reply_text(
+        "🔍 Verifying your screenshot with AI... please wait."
+    )
 
     try:
         photo = update.message.photo[-1]
@@ -104,22 +108,27 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             used_users.add(user_id)
             save_used_users(used_users)
             await processing_msg.edit_text(
-                f"✅ *Verification successful!*\n\nThank you {user_name}! Here is your exclusive invite link:\n\n"
-                f"🔗 {INVITE_LINK}\n\n_This link is for you only — please don't share it._",
-                parse_mode="Markdown"
+                f"✅ Verification successful!\n\n"
+                f"Thank you {user_name}! Here is your exclusive invite link:\n\n"
+                f"🔗 {INVITE_LINK}\n\n"
+                f"This link is for you only, please do not share it."
             )
         else:
             await processing_msg.edit_text(
-                f"❌ *Verification failed*\n\nReason: {reason}\n\n"
-                f"Make sure your screenshot clearly shows you shared a post from {MAIN_CHANNEL} to 5 channels, then try again.",
-                parse_mode="Markdown"
+                f"❌ Verification failed\n\n"
+                f"Reason: {reason}\n\n"
+                f"Make sure your screenshot clearly shows you shared a post from {MAIN_CHANNEL} to 5 channels, then try again."
             )
     except Exception as e:
         logger.error(f"Error for user {user_id}: {e}")
-        await processing_msg.edit_text("⚠️ Something went wrong. Please try again.")
+        await processing_msg.edit_text(
+            "⚠️ Something went wrong. Please try again."
+        )
 
 async def handle_non_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📸 Please send a *photo/screenshot* as proof.\n\nType /start for instructions.", parse_mode="Markdown")
+    await update.message.reply_text(
+        "📸 Please send a photo/screenshot as proof.\n\nType /start for instructions."
+    )
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
