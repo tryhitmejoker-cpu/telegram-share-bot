@@ -6,7 +6,7 @@ import os
 import httpx
 from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 OPENAI_API_KEY     = os.environ["OPENAI_API_KEY"]
@@ -95,6 +95,8 @@ Rules:
         return 0, False, "Could not process your screenshot. Please send a clear screenshot."
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        return
     user_name = update.effective_user.first_name or "there"
     counter = load_counter()
 
@@ -114,6 +116,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        return
     user_id = str(update.effective_user.id)
     user_name = update.effective_user.first_name or "there"
 
@@ -175,6 +179,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def handle_non_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        return
     user_name = update.effective_user.first_name or "there"
     await update.message.reply_text(
         f"📸 Hey {user_name}, please send a screenshot as proof of your shares.\n\n"
