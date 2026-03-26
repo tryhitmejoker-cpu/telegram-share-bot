@@ -12,6 +12,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 OPENAI_API_KEY     = os.environ["OPENAI_API_KEY"]
 FOLDER_LINK        = os.environ["FOLDER_LINK"]
 CHANNEL_ID         = int(os.environ["CHANNEL_ID"])
+ADMIN_ID           = 8633029909
 
 USED_USERS_FILE    = "used_users.json"
 COUNTER_FILE       = "counter.json"
@@ -41,19 +42,24 @@ def save_counter(count: int):
 
 async def verify_screenshot_with_ai(image_bytes: bytes) -> tuple[int, bool, str]:
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-    prompt = """You are a verification assistant for a Telegram bot.
-A user claims to have shared a Telegram folder link to 3 different Telegram channels or groups and sent a screenshot as proof.
+    prompt = """You are a strict verification assistant for a Telegram bot.
+A user claims to have shared a Telegram folder link to 3 different real Telegram channels or groups and sent a screenshot as proof.
 
-Carefully examine the screenshot and count how many different chats/channels/groups the link was shared to.
+Carefully examine the screenshot and count how many REAL channels or groups the link was shared to.
 
-Respond ONLY with JSON, no extra text, in this exact format:
+IMPORTANT RULES for counting:
+- ONLY count real channels or groups with actual members
+- Do NOT count: Saved Messages, bots, direct/private chats, or any chat that is clearly a bot
+- The share must show the folder link being sent, not just selected
+- If the screenshot does not show a Telegram share menu: count=0, valid=false
+
+Respond ONLY with JSON, no extra text:
 {"count": 3, "valid": true, "reason": "Brief reason"}
 
-Rules:
-- If it does not show Telegram at all or is not a real screenshot: count=0, valid=false
-- If it shows the link shared to 1 chat: count=1, valid=false
-- If it shows the link shared to 2 chats: count=2, valid=false
-- If it shows the link shared to 3 or more chats: count=3, valid=true"""
+- count=0, valid=false: not a real screenshot or no real channels
+- count=1, valid=false: shared to 1 real channel
+- count=2, valid=false: shared to 2 real channels
+- count=3, valid=true: shared to 3 or more real channels"""
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
@@ -120,6 +126,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_id = str(update.effective_user.id)
     user_name = update.effective_user.first_name or "there"
+    username = f"@{update.effective_user.username}" if update.effective_user.username else "no username"
 
     used_users = load_used_users()
     if user_id in used_users:
@@ -157,21 +164,56 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"This link is yours only and expires after 1 use.\n"
                 f"Welcome to the VIP! 💎"
             )
+
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"✅ VERIFIED\n\n"
+                     f"👤 {user_name} ({username})\n"
+                     f"🆔 {user_id}\n"
+                     f"📊 Shared to: {count} channels\n"
+                     f"🔗 Invite sent: {invite.invite_link}\n"
+                     f"👥 Total joined: {load_counter()}"
+            )
+
         elif count == 2:
             await processing_msg.edit_text(
                 f"⚠️ So close {user_name}!\n\n"
                 f"You only shared to 2 channels, share 1 more time to get access!"
             )
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"⚠️ FAILED — 2 CHANNELS\n\n"
+                     f"👤 {user_name} ({username})\n"
+                     f"🆔 {user_id}\n"
+                     f"📊 Only shared to 2 channels"
+            )
+
         elif count == 1:
             await processing_msg.edit_text(
                 f"⚠️ Not quite {user_name}!\n\n"
                 f"You only shared to 1 channel, share 2 more times to get access!"
             )
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"⚠️ FAILED — 1 CHANNEL\n\n"
+                     f"👤 {user_name} ({username})\n"
+                     f"🆔 {user_id}\n"
+                     f"📊 Only shared to 1 channel"
+            )
+
         else:
             await processing_msg.edit_text(
                 f"❌ Struggling to share the link {user_name}?\n\n"
                 f"Please contact Reggie for help!"
             )
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"❌ FAILED — INVALID SCREENSHOT\n\n"
+                     f"👤 {user_name} ({username})\n"
+                     f"🆔 {user_id}\n"
+                     f"📊 No valid shares detected"
+            )
+
     except Exception as e:
         logger.error(f"Error for user {user_id}: {e}")
         await processing_msg.edit_text(
