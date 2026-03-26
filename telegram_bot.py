@@ -12,7 +12,7 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 OPENAI_API_KEY     = os.environ["OPENAI_API_KEY"]
 FOLDER_LINK        = os.environ["FOLDER_LINK"]
 CHANNEL_ID         = int(os.environ["CHANNEL_ID"])
-ADMIN_ID           = 8633029909
+ADMIN_ID           = int(os.environ["ADMIN_ID"])
 
 USED_USERS_FILE    = "used_users.json"
 COUNTER_FILE       = "counter.json"
