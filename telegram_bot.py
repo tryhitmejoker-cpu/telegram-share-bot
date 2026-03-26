@@ -165,14 +165,15 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Welcome to the VIP! 💎"
             )
 
-            await context.bot.send_message(
+            await context.bot.send_photo(
                 chat_id=ADMIN_ID,
-                text=f"✅ VERIFIED\n\n"
-                     f"👤 {user_name} ({username})\n"
-                     f"🆔 {user_id}\n"
-                     f"📊 Shared to: {count} channels\n"
-                     f"🔗 Invite sent: {invite.invite_link}\n"
-                     f"👥 Total joined: {load_counter()}"
+                photo=photo.file_id,
+                caption=f"✅ VERIFIED\n\n"
+                        f"👤 {user_name} ({username})\n"
+                        f"🆔 {user_id}\n"
+                        f"📊 Shared to: {count} channels\n"
+                        f"🔗 Invite sent: {invite.invite_link}\n"
+                        f"👥 Total joined: {load_counter()}"
             )
 
         elif count == 2:
