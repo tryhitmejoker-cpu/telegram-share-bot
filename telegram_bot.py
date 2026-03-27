@@ -43,22 +43,22 @@ def save_counter(count: int):
 
 async def verify_screenshot_with_ai(image_bytes: bytes) -> tuple[int, bool, str]:
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-    prompt = """You are a verification assistant for a Telegram bot.
-A user claims to have shared a Telegram folder link to 3 different chats and sent a screenshot as proof.
+    prompt = """Look at this screenshot.
 
-Look at the screenshot and count how many chats are selected (shown with a blue tick or checkmark).
+If it shows ANY Telegram interface with chats, contacts, or a share/forward screen — count any blue ticks or checkmarks you can see.
 
-Respond ONLY with JSON, no extra text:
-{"count": 3, "valid": true, "reason": "Brief reason"}
+Respond ONLY with JSON:
+{"count": 3, "valid": true, "reason": "ok"}
 
 Rules:
-- Count ANY chats that are selected with a blue tick including groups, channels, or private chats
-- Saved Messages does NOT count
-- If it does not show a Telegram share menu at all: count=0, valid=false
-- If 1 chat selected: count=1, valid=false
-- If 2 chats selected: count=2, valid=false
-- If 3 or more chats selected: count=3, valid=true
-- Be lenient — if it looks like a Telegram share screen with selections, count them"""
+- If you can see 3 or more ticks/selections: count=3, valid=true
+- If you can see 2 ticks: count=2, valid=false
+- If you can see 1 tick: count=1, valid=false
+- If it shows Send (3) anywhere: count=3, valid=true
+- If it shows Send (2) anywhere: count=2, valid=false
+- If it shows Send (1) anywhere: count=1, valid=false
+- If it is clearly not Telegram at all: count=0, valid=false
+- If unsure about anything — default to count=3, valid=true"""
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
