@@ -13,6 +13,7 @@ OPENAI_API_KEY     = os.environ["OPENAI_API_KEY"]
 FOLDER_LINK        = os.environ["FOLDER_LINK"]
 CHANNEL_ID         = int(os.environ["CHANNEL_ID"])
 ADMIN_ID           = int(os.environ["ADMIN_ID"])
+ADMIN_USER_ID      = 8633029909
 
 USED_USERS_FILE    = "used_users.json"
 COUNTER_FILE       = "counter.json"
@@ -42,24 +43,22 @@ def save_counter(count: int):
 
 async def verify_screenshot_with_ai(image_bytes: bytes) -> tuple[int, bool, str]:
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-    prompt = """You are a strict verification assistant for a Telegram bot.
-A user claims to have shared a Telegram folder link to 3 different real Telegram channels or groups and sent a screenshot as proof.
+    prompt = """You are a verification assistant for a Telegram bot.
+A user claims to have shared a Telegram folder link to 3 different chats and sent a screenshot as proof.
 
-Carefully examine the screenshot and count how many REAL channels or groups the link was shared to.
-
-IMPORTANT RULES for counting:
-- ONLY count real channels or groups with actual members
-- Do NOT count: Saved Messages, bots, direct/private chats, or any chat that is clearly a bot
-- The share must show the folder link being sent, not just selected
-- If the screenshot does not show a Telegram share menu: count=0, valid=false
+Look at the screenshot and count how many chats are selected (shown with a blue tick or checkmark).
 
 Respond ONLY with JSON, no extra text:
 {"count": 3, "valid": true, "reason": "Brief reason"}
 
-- count=0, valid=false: not a real screenshot or no real channels
-- count=1, valid=false: shared to 1 real channel
-- count=2, valid=false: shared to 2 real channels
-- count=3, valid=true: shared to 3 or more real channels"""
+Rules:
+- Count ANY chats that are selected with a blue tick including groups, channels, or private chats
+- Saved Messages does NOT count
+- If it does not show a Telegram share menu at all: count=0, valid=false
+- If 1 chat selected: count=1, valid=false
+- If 2 chats selected: count=2, valid=false
+- If 3 or more chats selected: count=3, valid=true
+- Be lenient — if it looks like a Telegram share screen with selections, count them"""
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
@@ -121,6 +120,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_USER_ID:
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /broadcast Your message here"
+        )
+        return
+
+    message = " ".join(context.args)
+    used_users = load_used_users()
+    success = 0
+    failed = 0
+
+    await update.message.reply_text(f"📢 Sending to {len(used_users)} users...")
+
+    for user_id in used_users:
+        try:
+            await context.bot.send_message(
+                chat_id=int(user_id),
+                text=message
+            )
+            success += 1
+        except Exception as e:
+            logger.error(f"Failed to send to {user_id}: {e}")
+            failed += 1
+
+    await update.message.reply_text(
+        f"✅ Broadcast complete!\n\n"
+        f"Sent: {success}\n"
+        f"Failed: {failed}"
+    )
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         return
@@ -171,7 +204,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=f"✅ VERIFIED\n\n"
                         f"👤 {user_name} ({username})\n"
                         f"🆔 {user_id}\n"
-                        f"📊 Shared to: {count} channels\n"
+                        f"📊 Shared to: {count} chats\n"
                         f"🔗 Invite sent: {invite.invite_link}\n"
                         f"👥 Total joined: {load_counter()}"
             )
@@ -179,27 +212,27 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif count == 2:
             await processing_msg.edit_text(
                 f"⚠️ So close {user_name}!\n\n"
-                f"You only shared to 2 channels, share 1 more time to get access!"
+                f"You only shared to 2 chats, share 1 more time to get access!"
             )
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
-                text=f"⚠️ FAILED — 2 CHANNELS\n\n"
+                text=f"⚠️ FAILED — 2 CHATS\n\n"
                      f"👤 {user_name} ({username})\n"
                      f"🆔 {user_id}\n"
-                     f"📊 Only shared to 2 channels"
+                     f"📊 Only shared to 2 chats"
             )
 
         elif count == 1:
             await processing_msg.edit_text(
                 f"⚠️ Not quite {user_name}!\n\n"
-                f"You only shared to 1 channel, share 2 more times to get access!"
+                f"You only shared to 1 chat, share 2 more times to get access!"
             )
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
-                text=f"⚠️ FAILED — 1 CHANNEL\n\n"
+                text=f"⚠️ FAILED — 1 CHAT\n\n"
                      f"👤 {user_name} ({username})\n"
                      f"🆔 {user_id}\n"
-                     f"📊 Only shared to 1 channel"
+                     f"📊 Only shared to 1 chat"
             )
 
         else:
@@ -233,6 +266,7 @@ async def handle_non_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(~filters.PHOTO & ~filters.COMMAND, handle_non_photo))
     logger.info("Bot is running...")
