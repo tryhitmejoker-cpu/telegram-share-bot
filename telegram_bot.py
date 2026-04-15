@@ -17,6 +17,8 @@ ADMIN_USER_ID      = 8633029909
 
 USED_USERS_FILE    = "used_users.json"
 COUNTER_FILE       = "counter.json"
+SPACES_FILE        = "spaces.json"
+SPACES_MAX         = 6
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,24 +43,41 @@ def save_counter(count: int):
     with open(COUNTER_FILE, "w") as f:
         json.dump({"count": count}, f)
 
+def load_spaces() -> int:
+    if Path(SPACES_FILE).exists():
+        with open(SPACES_FILE, "r") as f:
+            return json.load(f).get("spaces", SPACES_MAX)
+    return SPACES_MAX
+
+def save_spaces(spaces: int):
+    with open(SPACES_FILE, "w") as f:
+        json.dump({"spaces": spaces}, f)
+
+def decrement_spaces():
+    spaces = load_spaces()
+    spaces -= 1
+    if spaces <= 0:
+        spaces = SPACES_MAX
+    save_spaces(spaces)
+    return spaces
+
 async def verify_screenshot_with_ai(image_bytes: bytes) -> tuple[int, bool, str]:
     image_b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
-    prompt = """Look at this screenshot.
+    prompt = """Look at this screenshot carefully.
 
-If it shows ANY Telegram interface with chats, contacts, or a share/forward screen — count any blue ticks or checkmarks you can see.
+You are verifying if someone has shared a Telegram link to 3 or more different chats.
 
 Respond ONLY with JSON:
 {"count": 3, "valid": true, "reason": "ok"}
 
 Rules:
-- If you can see 3 or more ticks/selections: count=3, valid=true
-- If you can see 2 ticks: count=2, valid=false
-- If you can see 1 tick: count=1, valid=false
-- If it shows Send (3) anywhere: count=3, valid=true
-- If it shows Send (2) anywhere: count=2, valid=false
-- If it shows Send (1) anywhere: count=1, valid=false
-- If it is clearly not Telegram at all: count=0, valid=false
-- If unsure about anything — default to count=3, valid=true"""
+- Only valid if you can CLEARLY see 3 or more chats selected with blue ticks
+- Only valid if Send (3) or higher is clearly visible
+- If you see Send (2): count=2, valid=false
+- If you see Send (1): count=1, valid=false
+- If unclear or can't confirm 3 shares: valid=false
+- If not Telegram at all: count=0, valid=false
+- Do NOT default to valid=true if unsure — default to valid=false"""
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
@@ -104,19 +123,28 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user_name = update.effective_user.first_name or "there"
     counter = load_counter()
+    spaces = load_spaces()
 
-    keyboard = [[InlineKeyboardButton("📤 Share Folder Link", url=f"https://t.me/share/url?url={FOLDER_LINK}")]]
+    keyboard = [[InlineKeyboardButton("📤 Share & Unlock Access", url=f"https://t.me/share/url?url={FOLDER_LINK}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        f"💎 VIP ACCESS VERIFICATION 💎\n\n"
-        f"👥 {counter} members have joined so far!\n\n"
-        f"Welcome {user_name}! You are one step away from exclusive access...\n\n"
-        f"To unlock your personal invite link:\n\n"
-        f"1️⃣ Tap the button below and share the folder link to 3 different Telegram channels or groups\n\n"
-        f"2️⃣ Screenshot your shares\n"
-        f"3️⃣ Send the screenshot here for verification\n\n"
-        f"⚡ Our AI verifies instantly!",
+        f"👑 STRICKLY VIP 👑\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🔥 Welcome {user_name}!\n\n"
+        f"You've been selected for exclusive VIP access. "
+        f"Join {counter} members already inside! 💎\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"🔐 HOW TO UNLOCK ACCESS\n"
+        f"━━━━━━━━━━━━━━━━━━━\n\n"
+        f"1️⃣ Tap the button below\n"
+        f"2️⃣ Share the link to 3 different Telegram groups or channels\n"
+        f"3️⃣ Send a screenshot as proof of your shares\n"
+        f"4️⃣ Our AI will verify instantly ⚡\n\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"🆓 Free Channel — Strictly Baddies\n"
+        f"⚠️ Only {spaces} spaces left — act fast!\n\n"
+        f"🎁 Your FREE VIP link is one step away... 🚀",
         reply_markup=reply_markup
     )
 
@@ -125,9 +153,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        await update.message.reply_text(
-            "Usage: /broadcast Your message here"
-        )
+        await update.message.reply_text("Usage: /broadcast Your message here")
         return
 
     message = " ".join(context.args)
@@ -139,19 +165,14 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for user_id in used_users:
         try:
-            await context.bot.send_message(
-                chat_id=int(user_id),
-                text=message
-            )
+            await context.bot.send_message(chat_id=int(user_id), text=message)
             success += 1
         except Exception as e:
             logger.error(f"Failed to send to {user_id}: {e}")
             failed += 1
 
     await update.message.reply_text(
-        f"✅ Broadcast complete!\n\n"
-        f"Sent: {success}\n"
-        f"Failed: {failed}"
+        f"✅ Broadcast complete!\n\nSent: {success}\nFailed: {failed}"
     )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -169,9 +190,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    processing_msg = await update.message.reply_text(
-        "🔍 Verifying your screenshot... please wait."
-    )
+    if "attempts" not in context.user_data:
+        context.user_data["attempts"] = 0
+
+    processing_msg = await update.message.reply_text("🔍 Verifying your screenshot... please wait.")
 
     try:
         photo = update.message.photo[-1]
@@ -189,6 +211,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             save_used_users(used_users)
             counter = load_counter() + 1
             save_counter(counter)
+            decrement_spaces()
+            context.user_data["attempts"] = 0
 
             await processing_msg.edit_text(
                 f"✅ VERIFIED — VIP ACCESS GRANTED\n\n"
@@ -209,50 +233,46 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"👥 Total joined: {load_counter()}"
             )
 
-        elif count == 2:
-            await processing_msg.edit_text(
-                f"⚠️ So close {user_name}!\n\n"
-                f"You only shared to 2 chats, share 1 more time to get access!"
-            )
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=f"⚠️ FAILED — 2 CHATS\n\n"
-                     f"👤 {user_name} ({username})\n"
-                     f"🆔 {user_id}\n"
-                     f"📊 Only shared to 2 chats"
-            )
-
-        elif count == 1:
-            await processing_msg.edit_text(
-                f"⚠️ Not quite {user_name}!\n\n"
-                f"You only shared to 1 chat, share 2 more times to get access!"
-            )
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=f"⚠️ FAILED — 1 CHAT\n\n"
-                     f"👤 {user_name} ({username})\n"
-                     f"🆔 {user_id}\n"
-                     f"📊 Only shared to 1 chat"
-            )
-
         else:
-            await processing_msg.edit_text(
-                f"❌ Struggling to share the link {user_name}?\n\n"
-                f"Please contact Reggie for help!"
-            )
+            context.user_data["attempts"] += 1
+            attempts = context.user_data["attempts"]
+
+            if attempts >= 3:
+                await processing_msg.edit_text(
+                    f"❌ You have failed verification {attempts} times {user_name}.\n\n"
+                    f"Please contact an admin for help: @stricklyvip"
+                )
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=f"❌ FAILED 3+ TIMES\n\n👤 {user_name} ({username})\n🆔 {user_id}"
+                )
+            elif count == 2:
+                await processing_msg.edit_text(
+                    f"⚠️ So close {user_name}!\n\n"
+                    f"You only shared to 2 chats — share 1 more and send a new screenshot!\n\n"
+                    f"❌ Attempt {attempts}/3"
+                )
+            elif count == 1:
+                await processing_msg.edit_text(
+                    f"⚠️ Not quite {user_name}!\n\n"
+                    f"You only shared to 1 chat — share 2 more and send a new screenshot!\n\n"
+                    f"❌ Attempt {attempts}/3"
+                )
+            else:
+                await processing_msg.edit_text(
+                    f"❌ Screenshot not valid {user_name}.\n\n"
+                    f"Please make sure you send a clear screenshot showing your shares.\n\n"
+                    f"❌ Attempt {attempts}/3"
+                )
+
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
-                text=f"❌ FAILED — INVALID SCREENSHOT\n\n"
-                     f"👤 {user_name} ({username})\n"
-                     f"🆔 {user_id}\n"
-                     f"📊 No valid shares detected"
+                text=f"⚠️ FAILED — ATTEMPT {attempts}\n\n👤 {user_name} ({username})\n🆔 {user_id}\n📊 Shares: {count}"
             )
 
     except Exception as e:
         logger.error(f"Error for user {user_id}: {e}")
-        await processing_msg.edit_text(
-            "⚠️ Something went wrong. Please try again."
-        )
+        await processing_msg.edit_text("⚠️ Something went wrong. Please try again.")
 
 async def handle_non_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
